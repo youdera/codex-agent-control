@@ -1,9 +1,11 @@
 import concurrent.futures
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
+import subprocess
 from types import SimpleNamespace
 import unittest
 from unittest import mock
@@ -121,6 +123,16 @@ class UsageTests(unittest.TestCase):
             finally:telemetry.DATA,telemetry.DB=old_data,old_db;telemetry.LOCAL.run_id=telemetry.LOCAL.task_id=None
 
 class ServiceControlTests(unittest.TestCase):
+    def test_worker_python_command_uses_configured_interpreter(self):
+        import control_center
+        env=control_center.environment()
+        self.assertEqual(env['PATH'].split(os.pathsep)[0],str(control_center.PYTHON.parent))
+        command=['cmd.exe','/d','/s','/c','python executable_probe.py'] if os.name=='nt' else ['/bin/sh','-c','python executable_probe.py']
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory)/'executable_probe.py').write_text('import sys; print(sys.executable)',encoding='utf-8')
+            result=subprocess.run(command,cwd=directory,env=env,capture_output=True,text=True,timeout=10,check=True)
+        self.assertEqual(Path(result.stdout.strip()).resolve(),control_center.PYTHON.resolve())
+
     def test_restart_refuses_queued_or_running_work_before_writing_request(self):
         import service_control
         for state in ('queued','running'):

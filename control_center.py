@@ -60,6 +60,7 @@ def environment(task=None):
     names=('PATH','SYSTEMROOT','WINDIR','TEMP','TMP','COMSPEC','USERPROFILE','APPDATA','LOCALAPPDATA','SYSTEMDRIVE','HOMEDRIVE','HOMEPATH',
       'DEEPSEEK_API_KEY','DS_CC_HOME','DS_CC_MCP_PYTHON','DS_CC_MCP_LAUNCHER','DS_CC_PORT')
     env={k:os.environ[k] for k in names if k in os.environ}
+    env['PATH']=str(PYTHON.parent)+os.pathsep+env.get('PATH',os.defpath)
     if task:
         env.update({'DS_CC_TASK_ID':task['id'],'DS_CC_ATTEMPT':str(task['attempt']),
           'DS_CC_MAX_TOKENS':str(task['budgets']['max_tokens']),'DS_CC_MAX_TURNS':str(task['budgets']['max_turns']),
