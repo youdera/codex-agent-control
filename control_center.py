@@ -24,7 +24,7 @@ from settings import DATA,DB,PYTHON,LAUNCHER,PORT
 STARTED=time.time()
 RUNTIME_FILES=('control_center.py','ledger.py','telemetry.py','settings.py','alignment.py','mcp_launcher.py','service_control.py')
 CODE_HASH=hashlib.sha256(b''.join((ROOT/name).read_bytes() for name in RUNTIME_FILES)).hexdigest()
-FEATURES=['alignment-contract','waiting-reason','graceful-service-control','queued-cancel','scaled-output-budget']
+FEATURES=['alignment-contract','waiting-reason','graceful-service-control','queued-cancel','scaled-output-budget','attempt-bound-snapshot']
 
 def save(path,value):
     path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
@@ -170,11 +170,17 @@ async def acknowledge(id,receipt):
 def public_snapshot():
     ledger=Ledger(DB);runs,totals,events=telemetry.snapshot();latest={}
     for r in runs:
-        if r['task_id'] and r['task_id'] not in latest:latest[r['task_id']]=r
+        if r['task_id']:latest.setdefault((r['task_id'],r['attempt']),r)
     tasks=[]
     for task in ledger.list_tasks(200):
         task['alignment']=task['spec'].get('alignment')
-        task.pop('spec',None);task['runtime']=latest.get(task['id']);tasks.append(task)
+        task.pop('spec',None)
+        task['runtime']=latest.get((task['id'],task['attempt'])) if task['state']!='queued' else None
+        task['previous_delivery']=task['previous_review']=None
+        if task['state'] in ('queued','running'):
+            task['previous_delivery']=task['delivery'];task['delivery']=None
+            task['previous_review']=task['review'];task['review']=None
+        tasks.append(task)
     by_id={t['id']:t for t in tasks};held={r['name'] for r in ledger.resources()}
     for t in tasks:
         t['waiting_reason']=None

@@ -123,6 +123,23 @@ class UsageTests(unittest.TestCase):
             finally:telemetry.DATA,telemetry.DB=old_data,old_db;telemetry.LOCAL.run_id=telemetry.LOCAL.task_id=None
 
 class ServiceControlTests(unittest.TestCase):
+    def test_retry_snapshot_does_not_mix_previous_attempt_with_current_run(self):
+        import control_center
+        old={'task_id':'one','attempt':1,'phase':'failed','total_tokens':100}
+        new={'task_id':'one','attempt':2,'phase':'request','total_tokens':5}
+        task={'id':'one','spec':{},'attempt':2,'state':'running','delivery':'attempt-1.json',
+            'review':{'decision':'rework'},'dependencies':[],'resources':[],'workspace':'w','released':False}
+        for state,runs,expected in (('running',[old],None),('running',[new,old],new),('queued',[old],None)):
+            with self.subTest(state=state,runs=len(runs)),mock.patch.object(control_center,'Ledger') as ledger,mock.patch.object(telemetry,'snapshot',return_value=(runs,{'total_tokens':105},[])):
+                ledger.return_value.list_tasks.return_value=[dict(task,state=state)]
+                ledger.return_value.resources.return_value=[];ledger.return_value.events.return_value=[]
+                result=control_center.public_snapshot();current=result['tasks'][0]
+                self.assertEqual(current['runtime'],expected)
+                self.assertIsNone(current['delivery']);self.assertIsNone(current['review'])
+                self.assertEqual(current['previous_delivery'],'attempt-1.json')
+                self.assertEqual(current['previous_review'],{'decision':'rework'})
+                self.assertEqual(result['summary']['total_tokens'],105)
+
     def test_worker_python_command_uses_configured_interpreter(self):
         import control_center
         env=control_center.environment()
