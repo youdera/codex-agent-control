@@ -37,7 +37,7 @@ python -m venv .venv
 .venv\Scripts\python.exe -I -X utf8 control_center.py serve
 ```
 
-打开 **http://127.0.0.1:8791**。Windows 也可双击 `start-panel.cmd`。程序不创建系统启动项。
+打开 [本地控制台](http://127.0.0.1:8791)。Windows 也可双击 `start-panel.cmd`。程序不创建系统启动项。
 
 Windows 可选地从已有的 Credential Manager 通用凭据 `codex-deepseek-mcp-api-key` 读取 Key；项目不会自动创建凭据。其他系统使用环境变量。不要把真实 Key 填进任务、命令参数、仓库或截图。
 
