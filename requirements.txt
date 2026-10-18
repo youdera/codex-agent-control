@@ -1,0 +1,4 @@
+# Tested adapter revision. Review and re-test before upgrading private loop hooks.
+deepseek-as-subagent @ git+https://github.com/PsChina/deepseek-as-subagent.git@7e54026392f85ccfc796f947faf9ffac3968a49e
+mcp==1.29.1
+pywin32==312; sys_platform == "win32"

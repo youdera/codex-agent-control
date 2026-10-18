@@ -1,0 +1,8 @@
+{
+  "task_id":"demo-coding-001",
+  "attempt":1,
+  "reviewer":"制作统筹",
+  "checks":["Replace with actual inspection of journaled files and Bash side effects"],
+  "transaction_ids":["REPLACE_WITH_EXACT_CURRENT_PENDING_TRANSACTION_ID"],
+  "artifact_hashes":{"REPLACE_WITH_ABSOLUTE_REPORTED_FILE_PATH":"REPLACE_WITH_VERIFIED_CURRENT_SHA256"}
+}
