@@ -1,24 +1,45 @@
 {
-  "id":"demo-readonly-001",
-  "title":"Read a local demo fixture",
-  "instruction":"Read demo_fixture.txt only. Return its exact sentence in under 50 words. Do not run commands, write files or inspect other directories.",
-  "context":"The controller will independently check the exact sentence and unchanged input hash.",
-  "workspace":"REPLACE_WITH_ABSOLUTE_EXISTING_PROJECT_DIRECTORY",
-  "readonly":true,
-  "scope":["demo_fixture.txt"],
-  "dependencies":[],
-  "resources":[],
-  "budgets":{"max_tokens":20000,"max_turns":4,"max_seconds":120},
-  "max_attempts":3,
-  "coordinator":"制作统筹"
-  ,"alignment":{
-    "mode":"existing-contract",
-    "goal":"Verify one isolated fixture without modifying it",
-    "deliverables":["Exact sentence from demo_fixture.txt"],
-    "acceptance":["Controller independently matches the sentence and unchanged input hash"],
-    "constraints":["Read-only; no commands or other directories"],
-    "decisions":["Use the already agreed source and verification method"],
-    "open_questions":[],
-    "basis":"Replace with the actual user instruction or confirmed contract reference"
+  "id": "demo-readonly-001",
+  "title": "Read a local demo fixture",
+  "instruction": "Read demo_fixture.txt only. Return its exact sentence in under 50 words. Do not run commands, write files or inspect other directories.",
+  "context": "The controller will independently check the exact sentence and unchanged input hash.",
+  "workspace": "REPLACE_WITH_ABSOLUTE_EXISTING_PROJECT_DIRECTORY",
+  "readonly": true,
+  "scope": [
+    "demo_fixture.txt"
+  ],
+  "dependencies": [],
+  "resources": [],
+  "budgets": {
+    "max_tokens": 20000,
+    "max_turns": 4,
+    "max_seconds": 120
+  },
+  "max_attempts": 2,
+  "coordinator": "制作统筹",
+  "alignment": {
+    "mode": "existing-contract",
+    "goal": "Verify one isolated fixture without modifying it",
+    "deliverables": [
+      "Exact sentence from demo_fixture.txt"
+    ],
+    "acceptance": [
+      "Controller independently matches the sentence and unchanged input hash"
+    ],
+    "constraints": [
+      "Read-only; no commands or other directories"
+    ],
+    "decisions": [
+      "Use the already agreed source and verification method"
+    ],
+    "open_questions": [],
+    "basis": "Replace with the actual user instruction or confirmed contract reference"
+  },
+  "execution": {
+    "inputs": [
+      "demo_fixture.txt"
+    ],
+    "outputs": [],
+    "commands": []
   }
 }

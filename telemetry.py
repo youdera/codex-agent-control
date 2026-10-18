@@ -109,6 +109,7 @@ def install():
     max_tokens=int(os.environ.get('DS_CC_MAX_TOKENS','120000'))
     max_turns=int(os.environ.get('DS_CC_MAX_TURNS','20'))
     max_seconds=int(os.environ.get('DS_CC_MAX_SECONDS','600'))
+    execution=json.loads(os.environ['DS_CC_EXECUTION']) if os.environ.get('DS_CC_EXECUTION') else None
     if not (1000<=max_tokens<=1000000 and 1<=max_turns<=50 and 10<=max_seconds<=18000):
         raise RuntimeError('invalid controller budgets')
     loop.MAX_TOTAL_TOKENS_PER_RUN=max_tokens
@@ -123,7 +124,10 @@ def install():
         if config.model!='deepseek-flash':raise RuntimeError('controller policy requires Flash; model change needs user approval')
         config.max_turns=min(config.max_turns,max_turns)
         config.max_run_seconds=min(config.max_run_seconds,max_seconds)
-        config.max_output_tokens=output_budget(max_tokens,config.max_output_tokens)
+        config.max_output_tokens=output_budget(max_tokens,min(config.max_output_tokens,execution['max_output_tokens']) if execution else config.max_output_tokens)
+        if execution:
+            from workflow import Guard
+            LOCAL.guard=Guard(config.workspace,execution)
         LOCAL.run_id=str(uuid.uuid4())
         LOCAL.task_id=os.environ.get('DS_CC_TASK_ID') or None
         now=time.time()
@@ -140,7 +144,7 @@ def install():
             _safe_emit('run_failed',{'error_type':type(error).__name__},phase='failed',finished_at=time.time(),error_code=type(error).__name__)
             raise
         finally:
-            LOCAL.run_id=LOCAL.task_id=None
+            LOCAL.run_id=LOCAL.task_id=None;LOCAL.guard=None
 
     @functools.wraps(original_turn)
     def turn(state,number):
@@ -161,11 +165,17 @@ def install():
         started=time.monotonic()
         _safe_emit('tool_started',{'name':name},phase='tool',tool_name=name,tool_path=_path_hint(call),turn=number+1)
         try:
+            guard=getattr(LOCAL,'guard',None)
+            if guard:guard.before(call)
             result=original_tool(config,call,number,**kwargs)
+            from workflow import error_code
             status='error' if isinstance(result,str) and result.startswith('ERROR:') else 'returned'
-            _safe_emit('tool_finished',{'name':name,'status':status,'duration_seconds':round(time.monotonic()-started,3)},phase='response')
+            _safe_emit('tool_finished',{'name':name,'status':status,'error_code':error_code(result),'duration_seconds':round(time.monotonic()-started,3)},phase='response')
+            if guard:result=guard.after(call,result)
             return result
         except BaseException as error:
+            from workflow import WorkflowStop
+            if isinstance(error,WorkflowStop):_safe_emit('workflow_stopped',{'code':str(error).split(';')[0]},phase='failed')
             _safe_emit('tool_failed',{'name':name,'error_type':type(error).__name__},phase='response')
             raise
 

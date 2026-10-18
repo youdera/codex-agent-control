@@ -1,0 +1,20 @@
+{
+  "task_id": "demo-readonly-001",
+  "attempt": 1,
+  "failure_class": "input",
+  "changed_conditions": [
+    "Controller prepared a smaller packet retaining required original fields and hashes"
+  ],
+  "instruction": "Read input/compact.json once; report only exact observations, source facts and unknowns. No other reads or commands.",
+  "execution": {
+    "inputs": [
+      "input/compact.json"
+    ],
+    "outputs": [],
+    "commands": []
+  },
+  "artifact_hashes": {
+    "REPLACE_WITH_ABSOLUTE_CURRENT_DELIVERY_PATH": "REPLACE_WITH_SHA256",
+    "REPLACE_WITH_ABSOLUTE_REPAIR_PROOF_PATH": "REPLACE_WITH_SHA256"
+  }
+}

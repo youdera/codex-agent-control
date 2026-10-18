@@ -38,8 +38,11 @@ class Ledger:
         c.execute('INSERT INTO cc_task_events VALUES(?,?,?,?,?)',(str(uuid.uuid4()),time.time(),id,kind,json.dumps(data or {},ensure_ascii=True)))
     def create(self,spec):
         spec=dict(spec)
-        allowed={'id','idempotency_key','title','instruction','context','workspace','readonly','dependencies','resources','budgets','scope','max_attempts','coordinator','alignment'}
+        allowed={'id','idempotency_key','title','instruction','context','workspace','readonly','dependencies','resources','budgets','scope','max_attempts','coordinator','alignment','execution'}
         if set(spec)-allowed:raise ValueError('unknown task field')
+        if 'execution' in spec:
+            from workflow import seal
+            spec=seal(spec)
         if 'alignment' in spec:
             from alignment import validate
             validate(spec['alignment'])
@@ -135,6 +138,14 @@ class Ledger:
             if receipt.get('attempt')!=t['attempt']:raise ValueError('evidence belongs to another attempt')
             allowed=('delivered',) if decision=='accepted' else ('delivered','failed','cancelled','interrupted','rework')
             if t['state'] not in allowed:raise ValueError('task is not reviewable')
+            if t['spec'].get('execution'):
+                if decision=='rework' and receipt.get('failure_class') not in ('input','tool','budget','factual','capability'):raise ValueError('classify the failure before rework')
+                if decision=='accepted':
+                    criteria=receipt.get('criteria',[]);expected=t['spec'].get('alignment',{}).get('acceptance',[])
+                    if not isinstance(receipt.get('adoption_scope'),str) or not receipt['adoption_scope'].strip():raise ValueError('explicit adoption scope required')
+                    if not expected or not isinstance(criteria,list) or len(criteria)!=len(expected) or {x.get('criterion') for x in criteria}!=set(expected):raise ValueError('review must cover every agreed criterion')
+                    for check in criteria:
+                        if check.get('result')!='pass' or not isinstance(check.get('evidence'),list) or not check['evidence'] or any(p not in hashes for p in check['evidence']):raise ValueError('unknown/failed or unhashed criterion cannot be accepted')
             if decision=='accepted' and (t['recovery_pending'] or (not t['readonly'] and not hashes)):raise ValueError('recovery or artifact review required')
             if decision=='accepted' and t['delivery'] and str(Path(t['delivery']).resolve()) not in hashes:raise ValueError('delivery hash required in acceptance evidence')
             if decision=='closed' and t['recovery_pending']:raise ValueError('recovery required before closing')
@@ -151,11 +162,24 @@ class Ledger:
             c.execute("UPDATE cc_tasks SET state='cancelled',released=1,updated_at=? WHERE id=?",(time.time(),id))
             self._event(c,id,'cancelled',{'attempt':t['attempt'],'before_dispatch':True})
         return True
-    def requeue(self,id,reason):
+    def spent_tokens(self,id):
+        with self.connect() as c:
+            if not c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='rt_usage'").fetchone():return 0
+            return c.execute('SELECT COALESCE(SUM(u.prompt_tokens+u.completion_tokens),0) FROM rt_usage u JOIN rt_runs r ON r.run_id=u.run_id WHERE r.task_id=?',(id,)).fetchone()[0]
+    def execution_plan(self,task):
+        for event in self.events(task['id'],500):
+            if event['kind']=='requeued' and event['data'].get('repair'):return event['data']['repair']['execution']
+        return task['spec'].get('execution')
+    def requeue(self,id,reason,repair=None):
+        task=self.get(id);plan=self.execution_plan(task)
+        if plan or repair:
+            from workflow import validate_repair
+            repair=validate_repair(repair,task,[e['data']['repair'] for e in self.events(id,500) if e['kind']=='requeued' and e['data'].get('repair')])
+            if self.spent_tokens(id)+5000>repair['execution']['max_task_tokens']:raise ValueError('insufficient remaining task budget; controller takeover')
         with self.connect() as c:
             c.execute('BEGIN IMMEDIATE');t=self._task(c.execute('SELECT * FROM cc_tasks WHERE id=?',(id,)).fetchone())
             if t['state']!='rework' or t['attempt']>=t['max_attempts'] or t['recovery_pending'] or not reason.strip():raise ValueError('requeue not allowed')
-            c.execute("UPDATE cc_tasks SET state='queued',released=1,pid=NULL,updated_at=? WHERE id=?",(time.time(),id));self._event(c,id,'requeued',{'reason':reason[:5000]})
+            c.execute("UPDATE cc_tasks SET state='queued',released=1,pid=NULL,updated_at=? WHERE id=?",(time.time(),id));self._event(c,id,'requeued',{'reason':reason[:5000],'repair':repair})
         return self.get(id)
     def clear_recovery(self,id,attempt):
         with self.connect() as c:

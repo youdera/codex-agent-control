@@ -1,11 +1,23 @@
 {
-  "task_id":"demo-readonly-001",
-  "attempt":1,
-  "decision":"accepted",
-  "reviewer":"制作统筹",
-  "checks":["Replace with actual independent output and version checks"],
-  "artifact_hashes":{
-    "REPLACE_WITH_ABSOLUTE_ARTIFACT_PATH":"REPLACE_WITH_VERIFIED_SHA256",
-    "REPLACE_WITH_ABSOLUTE_DELIVERY_JSON_PATH":"REPLACE_WITH_VERIFIED_SHA256"
-  }
+  "task_id": "demo-readonly-001",
+  "attempt": 1,
+  "decision": "accepted",
+  "reviewer": "制作统筹",
+  "checks": [
+    "Replace with actual independent output and version checks"
+  ],
+  "artifact_hashes": {
+    "REPLACE_WITH_ABSOLUTE_ARTIFACT_PATH": "REPLACE_WITH_VERIFIED_SHA256",
+    "REPLACE_WITH_ABSOLUTE_DELIVERY_JSON_PATH": "REPLACE_WITH_VERIFIED_SHA256"
+  },
+  "adoption_scope": "Exact fixture text and unchanged input only",
+  "criteria": [
+    {
+      "criterion": "Controller independently matches the sentence and unchanged input hash",
+      "result": "pass",
+      "evidence": [
+        "REPLACE_WITH_ABSOLUTE_ARTIFACT_PATH"
+      ]
+    }
+  ]
 }

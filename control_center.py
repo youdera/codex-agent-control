@@ -22,9 +22,9 @@ import telemetry
 from ledger import Ledger
 from settings import DATA,DB,PYTHON,LAUNCHER,PORT
 STARTED=time.time()
-RUNTIME_FILES=('control_center.py','ledger.py','telemetry.py','settings.py','alignment.py','mcp_launcher.py','service_control.py')
+RUNTIME_FILES=('control_center.py','ledger.py','telemetry.py','settings.py','alignment.py','mcp_launcher.py','service_control.py','workflow.py')
 CODE_HASH=hashlib.sha256(b''.join((ROOT/name).read_bytes() for name in RUNTIME_FILES)).hexdigest()
-FEATURES=['alignment-contract','waiting-reason','graceful-service-control','queued-cancel','scaled-output-budget','attempt-bound-snapshot']
+FEATURES=['alignment-contract','waiting-reason','graceful-service-control','queued-cancel','scaled-output-budget','attempt-bound-snapshot','bounded-execution','evidence-backed-retry']
 
 def save(path,value):
     path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
@@ -65,6 +65,7 @@ def environment(task=None):
         env.update({'DS_CC_TASK_ID':task['id'],'DS_CC_ATTEMPT':str(task['attempt']),
           'DS_CC_MAX_TOKENS':str(task['budgets']['max_tokens']),'DS_CC_MAX_TURNS':str(task['budgets']['max_turns']),
           'DS_CC_MAX_SECONDS':str(task['budgets']['max_seconds'])})
+        if task.get('_execution'):env['DS_CC_EXECUTION']=json.dumps(task['_execution'],ensure_ascii=True)
     return env
 
 def parse_mcp(response):
@@ -96,6 +97,13 @@ async def execute_task(id,attempt):
     destination=DATA/'deliveries'/id/f'attempt-{attempt}.json'
     before={};after={};recovery=None;result=None;state='failed';error=None;diagnostic=None
     try:
+        plan=ledger.execution_plan(task)
+        if plan:
+            from workflow import seal
+            plan=seal(dict(task['spec'],execution=plan))['execution']
+            remaining=plan['max_task_tokens']-ledger.spent_tokens(id)
+            if remaining<5000:raise RuntimeError('task token budget exhausted; controller takeover')
+            task['_execution']=plan;task['budgets']=dict(task['budgets'],max_tokens=min(task['budgets']['max_tokens'],remaining))
         before=scope_hashes(task)
         params=StdioServerParameters(command=str(PYTHON),args=['-I','-X','utf8',str(LAUNCHER)],cwd=task['workspace'],env=environment(task))
         async with stdio_client(params) as (reader,writer):
@@ -103,11 +111,15 @@ async def execute_task(id,attempt):
                 await session.initialize()
                 recovery=parse_mcp(await session.call_tool('get_deepseek_recovery',{}))
                 if recovery['count']:raise RuntimeError('pending upstream recovery; inspect before dispatch')
-                feedback=[e['data'].get('reason','') for e in reversed(ledger.events(id,100)) if e['kind']=='requeued']
+                retries=[e['data'] for e in ledger.events(id,500) if e['kind']=='requeued']
+                repair=retries[0].get('repair') if retries else None
+                feedback=[e.get('reason','') for e in reversed(retries)]
                 instruction=task['spec']['instruction']
+                if repair:instruction=repair['instruction']
+                if plan:instruction+='\nExecution limits (authoritative; no exploration outside exact input/output files):\n'+json.dumps(plan,ensure_ascii=True)+'\nReturn concise observations with fact IDs/source pointers; separate inference and unknowns. Omitted evidence is not evidence of absence. Report a blocking tool error instead of trying alternative shell writes. Never self-accept.'
                 if task['spec'].get('alignment'):
                     instruction+='\n\nAgreed task contract (execute and report against these exact acceptance criteria):\n'+json.dumps(task['spec']['alignment'],ensure_ascii=False)
-                if feedback:instruction+='\n\nController rework feedback:\n'+'\n'.join(feedback)
+                if feedback and not repair:instruction+='\n\nController rework feedback:\n'+'\n'.join(feedback)
                 context=task['spec']['context']+'\nController: 制作统筹, official Sol. Execute only this task, use bounded targeted reads, return concise evidence. Never self-accept. Respect all supplied project/GUI/resource constraints. Scope: '+json.dumps(task['scope'],ensure_ascii=True)
                 started=parse_mcp(await session.call_tool('start_deepseek_readonly' if task['readonly'] else 'start_deepseek',{'task':instruction,'context':context,'model':'flash'}))
                 job=started['job_id'];deadline=time.monotonic()+task['budgets']['max_seconds']+30;cancelled=False
@@ -186,6 +198,8 @@ def public_snapshot():
     tasks=[]
     for task in ledger.list_tasks(200):
         task['alignment']=task['spec'].get('alignment')
+        plan=ledger.execution_plan(task)
+        if plan:task['efficiency']={'task_tokens':ledger.spent_tokens(task['id']),'max_task_tokens':plan['max_task_tokens'],'max_read_bytes':plan['max_read_bytes'],'max_tool_calls':plan['max_tool_calls']}
         task.pop('spec',None)
         task['runtime']=latest.get((task['id'],task['attempt'])) if task['state']!='queued' else None
         task['previous_delivery']=task['previous_review']=None
@@ -304,11 +318,13 @@ def serve():
 
 def main():
     p=argparse.ArgumentParser();sub=p.add_subparsers(dest='cmd',required=True)
-    sub.add_parser('serve');sub.add_parser('status')
+    sub.add_parser('serve');s=sub.add_parser('status');s.add_argument('--task')
     s=sub.add_parser('submit');s.add_argument('spec')
     s=sub.add_parser('run');s.add_argument('id');s.add_argument('attempt',type=int)
     s=sub.add_parser('review');s.add_argument('id');s.add_argument('decision',choices=['accepted','rework','closed']);s.add_argument('evidence')
-    s=sub.add_parser('requeue');s.add_argument('id');s.add_argument('reason')
+    s=sub.add_parser('requeue');s.add_argument('id');s.add_argument('reason');s.add_argument('--repair',required=True)
+    for name in ('prepare-order','make-packet'):
+        s=sub.add_parser(name);s.add_argument('source');s.add_argument('output')
     s=sub.add_parser('ack-recovery');s.add_argument('id');s.add_argument('receipt')
     s=sub.add_parser('cancel');s.add_argument('id')
     for name in ('reserve','release'):
@@ -316,14 +332,27 @@ def main():
     args=p.parse_args();ledger=Ledger(DB)
     if args.cmd=='serve':return serve()
     if args.cmd=='run':return asyncio.run(execute_task(args.id,args.attempt))
-    if args.cmd=='status':result=public_snapshot()
+    if args.cmd=='status':
+        result=public_snapshot()
+        if args.task:result=next(t for t in result['tasks'] if t['id']==args.task)
+    elif args.cmd=='prepare-order':
+        from workflow import seal
+        result=seal(json.loads(Path(args.source).read_text(encoding='utf-8-sig')));save(args.output,result)
+        result={'prepared':str(Path(args.output).resolve()),'input_bytes':sum(x['bytes'] for x in result['execution']['inputs']),'max_attempts':result['max_attempts']}
+    elif args.cmd=='make-packet':
+        from workflow import packet
+        result=packet(json.loads(Path(args.source).read_text(encoding='utf-8-sig')))
+        Path(args.output).write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+        result={'packet':str(Path(args.output).resolve()),'bytes':Path(args.output).stat().st_size,'facts':len(result['facts']),'sha256':sha(args.output)}
     elif args.cmd=='submit':
         spec=json.loads(Path(args.spec).read_text(encoding='utf-8-sig'))
         from alignment import validate
         validate(spec.get('alignment'))
+        from workflow import seal
+        spec=seal(spec)
         result=ledger.create(spec)
     elif args.cmd=='review':result=ledger.review(args.id,args.decision,{'path':str(Path(args.evidence).resolve()),'sha256':sha(args.evidence)},'制作统筹')
-    elif args.cmd=='requeue':result=ledger.requeue(args.id,args.reason)
+    elif args.cmd=='requeue':result=ledger.requeue(args.id,args.reason,json.loads(Path(args.repair).read_text(encoding='utf-8-sig')))
     elif args.cmd=='ack-recovery':result=asyncio.run(acknowledge(args.id,args.receipt))
     elif args.cmd=='cancel':
         if ledger.cancel_queued(args.id):result=ledger.get(args.id)
@@ -333,6 +362,7 @@ def main():
             save(DATA/'requests'/args.id/str(t['attempt'])/'cancel.json',{'at':time.time()});result={'cancel_requested':args.id}
     elif args.cmd=='reserve':ledger.reserve(args.resource,args.owner);result=ledger.resources()
     elif args.cmd=='release':ledger.release_reservation(args.resource,args.owner);result=ledger.resources()
+    if isinstance(result,dict) and 'spec' in result:result={k:result[k] for k in ('id','state','attempt','released','recovery_pending','delivery','review')}
     print(json.dumps(result,ensure_ascii=True))
 
 if __name__=='__main__':

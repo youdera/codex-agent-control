@@ -72,7 +72,7 @@ flowchart LR
     E --> F[主控独立核验]
     F -->|通过| G[accepted]
     F -->|返修| H[rework]
-    H -->|显式重派 / 最多3次| C
+    H -->|有证据修复 / 新任务最多2次| C
     F -->|终止本项| I[closed / 未通过]
 ```
 
@@ -86,6 +86,8 @@ flowchart LR
 
 ### 2. 提交有边界的完整任务
 
+新任务先读 [有界派工与止损流程](WORKFLOW.md)，准备精确输入与执行计划。
+
 先用内置 [grill-me](skills/grill-me/SKILL.md) 对齐目标、交付物、边界和验收标准。主控查事实、复用用户已有决定，只向用户追问关键未决项；执行者不重复盘问。面板的“任务对齐”按钮提供可复制提示词，实际对齐在主控聊天完成。
 
 新 CLI 工单必须附 `alignment` 摘要：`mode` (`grill-me` / `existing-contract`)、`goal`、`deliverables[]`、`acceptance[]`、`constraints[]`、`decisions[]`、`open_questions[]`、`basis`。未决问题非空时拒绝提交；程序检查结构，主控负责依据真实、确认不伪造。历史已登记任务兼容。
@@ -93,7 +95,8 @@ flowchart LR
 复制 [examples/work-order.example.json](examples/work-order.example.json)，填写合法工作目录后提交本地副本：
 
 ```powershell
-.venv\Scripts\python.exe control_center.py submit work-order.local.json
+.venv\Scripts\python.exe control_center.py prepare-order work-order.local.json prepared.local.json
+.venv\Scripts\python.exe control_center.py submit prepared.local.json
 ```
 
 - `id` / `idempotency_key` 防止重复提交；相同 key 配不同内容会被拒绝。
@@ -101,7 +104,7 @@ flowchart LR
 - `scope` 是相对工作目录的输入/输出清单，用于前后哈希核对；它不是 OS 沙箱。
 - `dependencies` 中的任务必须 **accepted**，执行者自报完成不能放行。
 - `resources` 声明共享资源；例如所有 UE/Blender/导入/渲染作业共同声明 `heavy-runtime`。
-- 默认预算：累计 120000 token、20 轮、600 秒，可显式调整；最多 3 次人工发起的执行批次。
+- 新任务默认最多2次执行；只读跨轮30000 token、修改跨轮60000 token，累计失败和返修。输入/输出/工具止损详见 WORKFLOW.md；旧工单历史不改。
 - 本版工单 `coordinator` / CLI 审核者标签固定为“制作统筹”。这是本机工作流标签，不是身份认证。
 
 ```powershell
@@ -146,7 +149,7 @@ CLI 会重新查询上游当前记录，要求 ID 集合完全一致、文件哈
 
 # 有问题：同一逻辑任务返修，保留旧执行批次和成果。
 .venv\Scripts\python.exe control_center.py review TASK_ID rework review.local.json
-.venv\Scripts\python.exe control_center.py requeue TASK_ID "具体失败证据与修复要求"
+.venv\Scripts\python.exe control_center.py requeue TASK_ID "已验证的改变" --repair repair.local.json
 
 # 不再继续：回收工位但不标通过，也不放行依赖。
 .venv\Scripts\python.exe control_center.py review TASK_ID closed review.local.json
@@ -175,10 +178,10 @@ CLI 会重新查询上游当前记录，要求 ID 集合完全一致、文件哈
 ## 验证与目录
 
 ```powershell
-.venv\Scripts\python.exe -I -X utf8 test_control_center.py
+.venv\Scripts\python.exe -I -X utf8 -m unittest discover -p 'test*.py' -v
 ```
 
-20 项检查覆盖任务对齐门、并发互斥、依赖验收门、修改恢复门、旧证据/旧批次拒绝、人工有界返修、外部资源预留、失联留档、关闭不放行依赖、逐请求去重、缓存口径，以及有工单时拒绝重启、旧服务不自动终止、防止重复启动，以及小预算的请求预留与总额耗尽拒绝，以及排队取消与调度互斥，以及真实子进程的 Python 解释器路径。
+33 项检查覆盖任务对齐门、并发互斥、依赖验收门、修改恢复门、旧证据/旧批次拒绝、人工有界返修、外部资源预留、失联留档、关闭不放行依赖、逐请求去重、缓存口径，以及有工单时拒绝重启、旧服务不自动终止、防止重复启动，以及小预算的请求预留与总额耗尽拒绝，以及排队取消与调度互斥，以及真实子进程的 Python 解释器路径。
 
 本机还实际核验过两名 Flash 并行、Edit + 真命令校验、只读随机标记、恢复确认、真实 runner 中断及桌面/手机界面。私有测试工单、运行日志和截图不随仓库发布；这不代表任意项目或上游新版本都已验证。
 
@@ -202,3 +205,5 @@ CLI 会重新查询上游当前记录，要求 ID 集合完全一致、文件哈
 实时状态按任务号和执行轮次绑定：新轮次启动前不显示旧轮的失败活动、交付或验收状态。上轮交付与审核在详情中明确标为历史，总用量仍保留所有轮次。
 
 验收回执同样绑定轮次；已交付的新轮次也不会带出旧轮审核。旧格式回执仅在小于64KiB且哈希一致时解析所属轮次。
+
+新增工作流检查覆盖确定性证据包、输入哈希与大小预检、父进程工具止损、跨轮额度、结构化修复、无变化重试拒绝及逐项验收。所有测试使用本地模拟工具与记录，不重放生产模型调用。
