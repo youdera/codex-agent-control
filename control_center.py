@@ -24,7 +24,7 @@ from settings import DATA,DB,PYTHON,LAUNCHER,PORT
 STARTED=time.time()
 RUNTIME_FILES=('control_center.py','ledger.py','telemetry.py','settings.py','alignment.py','mcp_launcher.py','service_control.py')
 CODE_HASH=hashlib.sha256(b''.join((ROOT/name).read_bytes() for name in RUNTIME_FILES)).hexdigest()
-FEATURES=['alignment-contract','waiting-reason','graceful-service-control']
+FEATURES=['alignment-contract','waiting-reason','graceful-service-control','queued-cancel','scaled-output-budget']
 
 def save(path,value):
     path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
@@ -306,9 +306,11 @@ def main():
     elif args.cmd=='requeue':result=ledger.requeue(args.id,args.reason)
     elif args.cmd=='ack-recovery':result=asyncio.run(acknowledge(args.id,args.receipt))
     elif args.cmd=='cancel':
-        t=ledger.get(args.id)
-        if t['state']!='running':raise ValueError('only running tasks can be cancelled')
-        save(DATA/'requests'/args.id/str(t['attempt'])/'cancel.json',{'at':time.time()});result={'cancel_requested':args.id}
+        if ledger.cancel_queued(args.id):result=ledger.get(args.id)
+        else:
+            t=ledger.get(args.id)
+            if t['state']!='running':raise ValueError('only queued or running tasks can be cancelled')
+            save(DATA/'requests'/args.id/str(t['attempt'])/'cancel.json',{'at':time.time()});result={'cancel_requested':args.id}
     elif args.cmd=='reserve':ledger.reserve(args.resource,args.owner);result=ledger.resources()
     elif args.cmd=='release':ledger.release_reservation(args.resource,args.owner);result=ledger.resources()
     print(json.dumps(result,ensure_ascii=True))

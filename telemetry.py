@@ -95,6 +95,10 @@ def _path_hint(call):
     except Exception:pass
     return ''
 
+def output_budget(total_tokens,configured):
+    # Reserve room for prompt/history and later tool turns in small work orders.
+    return min(configured,16384,max(256,total_tokens//4))
+
 def install():
     """Wrap stable loop boundaries without replacing tool/lease/recovery semantics."""
     import deepseek_mcp.agent_loop as loop
@@ -119,7 +123,7 @@ def install():
         if config.model!='deepseek-flash':raise RuntimeError('controller policy requires Flash; model change needs user approval')
         config.max_turns=min(config.max_turns,max_turns)
         config.max_run_seconds=min(config.max_run_seconds,max_seconds)
-        config.max_output_tokens=min(config.max_output_tokens,16384)
+        config.max_output_tokens=output_budget(max_tokens,config.max_output_tokens)
         LOCAL.run_id=str(uuid.uuid4())
         LOCAL.task_id=os.environ.get('DS_CC_TASK_ID') or None
         now=time.time()

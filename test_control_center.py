@@ -76,8 +76,30 @@ class LedgerTests(unittest.TestCase):
         t=self.task('aligned',alignment=brief);self.assertEqual(t['spec']['alignment'],brief)
         brief=dict(brief,mode='grill-me',open_questions=['which source?'])
         with self.assertRaises(ValueError):self.task('unresolved',alignment=brief)
+    def test_cancel_blocked_queue_never_dispatches_or_releases_external_reservation(self):
+        self.l.reserve('heavy','external');self.task('one',resources=['heavy']);self.task('dependent',self.b,dependencies=['one'])
+        self.assertTrue(self.l.cancel_queued('one'))
+        t=self.l.get('one');self.assertEqual((t['state'],t['attempt'],t['released']),('cancelled',0,True))
+        self.assertIsNone(self.l.claim_next());self.assertEqual(self.l.resources()[0]['owner'],'external')
+        self.assertTrue(self.l.cancel_queued('dependent'));self.assertFalse(self.l.cancel_queued('one'))
+        self.task('running');t=self.l.claim_next();self.assertFalse(self.l.cancel_queued(t['id']))
+        self.assertEqual(self.l.get(t['id'])['state'],'running')
 
 class UsageTests(unittest.TestCase):
+    def test_small_order_can_fund_provider_request_without_relaxing_total_budget(self):
+        import deepseek_mcp.agent_loop as loop
+        for total,used,prompt in ((15000,0,3000),(30000,17000,2200)):
+            state=SimpleNamespace(prompt_tokens=used,completion_tokens=0,budget_tokens=used,
+                last_request_bytes=6000,last_prompt_tokens=prompt,
+                config=SimpleNamespace(max_output_tokens=telemetry.output_budget(total,16384)))
+            with self.subTest(total=total),mock.patch.object(loop,'MAX_TOTAL_TOKENS_PER_RUN',total):
+                loop._ensure_request_budget(state,6000)
+                state.config.max_output_tokens=16384
+                with self.assertRaises(loop.AgentBudgetExceeded):loop._ensure_request_budget(state,6000)
+                state.config.max_output_tokens=telemetry.output_budget(total,16384)
+                state.budget_tokens=total
+                with self.assertRaises(loop.AgentBudgetExceeded):loop._ensure_request_budget(state,6000)
+
     def test_provider_delta_dedup_and_cache_subset(self):
         with tempfile.TemporaryDirectory() as directory:
             old_data,old_db=telemetry.DATA,telemetry.DB

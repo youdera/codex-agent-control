@@ -144,6 +144,13 @@ class Ledger:
             c.execute('UPDATE cc_tasks SET state=?,released=?,review=?,updated_at=? WHERE id=?',(decision,int(decision in ('accepted','closed') or t['readonly']),json.dumps({'receipt':evidence,'reviewer':reviewer,'decision':decision},ensure_ascii=True),time.time(),id))
             self._event(c,id,'review_'+decision,{'reviewer':reviewer,'evidence_sha256':evidence['sha256']})
         return self.get(id)
+    def cancel_queued(self,id):
+        with self.connect() as c:
+            c.execute('BEGIN IMMEDIATE');t=self._task(c.execute('SELECT * FROM cc_tasks WHERE id=?',(id,)).fetchone())
+            if t['state']!='queued':return False
+            c.execute("UPDATE cc_tasks SET state='cancelled',released=1,updated_at=? WHERE id=?",(time.time(),id))
+            self._event(c,id,'cancelled',{'attempt':t['attempt'],'before_dispatch':True})
+        return True
     def requeue(self,id,reason):
         with self.connect() as c:
             c.execute('BEGIN IMMEDIATE');t=self._task(c.execute('SELECT * FROM cc_tasks WHERE id=?',(id,)).fetchone())

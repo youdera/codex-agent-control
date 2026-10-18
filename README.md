@@ -178,7 +178,7 @@ CLI 会重新查询上游当前记录，要求 ID 集合完全一致、文件哈
 .venv\Scripts\python.exe -I -X utf8 test_control_center.py
 ```
 
-15 项检查覆盖任务对齐门、并发互斥、依赖验收门、修改恢复门、旧证据/旧批次拒绝、人工有界返修、外部资源预留、失联留档、关闭不放行依赖、逐请求去重、缓存口径，以及有工单时拒绝重启、旧服务不自动终止、防止重复启动。
+17 项检查覆盖任务对齐门、并发互斥、依赖验收门、修改恢复门、旧证据/旧批次拒绝、人工有界返修、外部资源预留、失联留档、关闭不放行依赖、逐请求去重、缓存口径，以及有工单时拒绝重启、旧服务不自动终止、防止重复启动，以及小预算的请求预留与总额耗尽拒绝，以及排队取消与调度互斥。
 
 本机还实际核验过两名 Flash 并行、Edit + 真命令校验、只读随机标记、恢复确认、真实 runner 中断及桌面/手机界面。私有测试工单、运行日志和截图不随仓库发布；这不代表任意项目或上游新版本都已验证。
 
@@ -194,3 +194,5 @@ CLI 会重新查询上游当前记录，要求 ID 集合完全一致、文件哈
 | `index.html` / `skins/` | 面板与换肤 |
 
 设计参考 [AgentMeter](https://github.com/LyleMi/AgentMeter)、[Vibe Kanban](https://github.com/BloopAI/vibe-kanban)、[Agent Orchestrator](https://github.com/OrchestratorInc/agent-orchestrator) 与 [GasTown](https://github.com/gastownhall/gastown)。这些框架没有被整套安装或嵌入。项目与 OpenAI、DeepSeek、角色权利人均无官方关联。
+
+小预算任务的单请求最大输出上限为 `min(原配置, 16384, max(256, 总预算 // 4))`，为输入、多轮工具和最终回复留出空间；累计预算保护保持。`cancel <task-id>` 也支持排队工单，以原子状态更新阻止后续派发；不会标记通过或放行依赖。
