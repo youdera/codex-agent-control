@@ -22,6 +22,9 @@ import telemetry
 from ledger import Ledger
 from settings import DATA,DB,PYTHON,LAUNCHER,PORT
 STARTED=time.time()
+RUNTIME_FILES=('control_center.py','ledger.py','telemetry.py','settings.py','alignment.py','mcp_launcher.py','service_control.py')
+CODE_HASH=hashlib.sha256(b''.join((ROOT/name).read_bytes() for name in RUNTIME_FILES)).hexdigest()
+FEATURES=['alignment-contract','waiting-reason','graceful-service-control']
 
 def save(path,value):
     path=Path(path);path.parent.mkdir(parents=True,exist_ok=True)
@@ -182,7 +185,7 @@ def public_snapshot():
             elif any(x['id']!=t['id'] and not x['released'] and x['state']!='queued' and x['workspace']==t['workspace'] for x in tasks):t['waiting_reason']='等待同工位执行/验收回收'
             else:t['waiting_reason']='等待执行槽'
     # Prompts and final model text are deliberately absent from the read-only API.
-    return {'generated_at':time.time(),'service':{'pid':os.getpid(),'started_at':STARTED,'max_parallel':3},
+    return {'generated_at':time.time(),'service':{'pid':os.getpid(),'started_at':STARTED,'max_parallel':3,'code_hash':CODE_HASH,'features':FEATURES},
       'summary':{'tasks':len(tasks),'running':sum(t['state']=='running' for t in tasks),**totals},
       'tasks':tasks,'runs':runs,'events':sorted(events+ledger.events(limit=100),key=lambda e:e['at'],reverse=True)[:100],
       'resources':ledger.resources(),'notes':['仅接入后新启动的 MCP 进程有实时用量，旧调用不追溯。',
@@ -202,11 +205,12 @@ def skins():
 
 def serve():
     singleton=take_singleton();ledger=Ledger(DB);telemetry.initialize()
+    stop_event=threading.Event();dispatch_lock=threading.Lock();shutdown_request={}
     running=[t for t in ledger.list_tasks(500) if t['state']=='running']
     ledger.recover_orphans([t['pid'] for t in running if alive(t['pid'])])
     def schedule():
         last_sweep=0
-        while True:
+        while not stop_event.is_set():
             task=None
             try:
                 if time.monotonic()-last_sweep>5:
@@ -214,12 +218,14 @@ def serve():
                     live=[t['pid'] for t in active if alive(t['pid']) or (t['pid'] is None and time.time()-t['updated_at']<15)]
                     ledger.recover_orphans(live)
                     last_sweep=time.monotonic()
-                task=ledger.claim_next(3)
-                if task:
-                    log=DATA/'runner-logs'/f"{task['id']}-{task['attempt']}.log";log.parent.mkdir(parents=True,exist_ok=True)
-                    with log.open('ab') as handle:
-                        subprocess.Popen([str(PYTHON),'-I','-X','utf8',str(ROOT/'control_center.py'),'run',task['id'],str(task['attempt'])],cwd=str(ROOT),env=environment(),stdout=handle,stderr=handle,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
-                else:time.sleep(1)
+                with dispatch_lock:
+                    if stop_event.is_set():break
+                    task=ledger.claim_next(3)
+                    if task:
+                        log=DATA/'runner-logs'/f"{task['id']}-{task['attempt']}.log";log.parent.mkdir(parents=True,exist_ok=True)
+                        with log.open('ab') as handle:
+                            subprocess.Popen([str(PYTHON),'-I','-X','utf8',str(ROOT/'control_center.py'),'run',task['id'],str(task['attempt'])],cwd=str(ROOT),env=environment(),stdout=handle,stderr=handle,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+                if not task:stop_event.wait(1)
             except Exception as exc:
                 if task:
                     current=ledger.get(task['id'])
@@ -251,10 +257,30 @@ def serve():
             except (BrokenPipeError,ConnectionResetError):pass
             except Exception:self.send_error(500)
     http=ThreadingHTTPServer(('127.0.0.1',PORT),Handler)
-    save(DATA/'service.json',{'pid':os.getpid(),'started_at':STARTED,'url':f'http://127.0.0.1:{PORT}'})
-    threading.Thread(target=schedule,daemon=True).start()
+    def lifecycle():
+        handled=set()
+        while not stop_event.wait(.2):
+            try:
+                request=json.loads((DATA/'service-request.json').read_text(encoding='utf-8'))
+            except (FileNotFoundError,json.JSONDecodeError):continue
+            if not isinstance(request,dict):continue
+            rid=request.get('request_id')
+            if not isinstance(rid,str) or len(rid)!=32 or any(c not in '0123456789abcdef' for c in rid) or rid in handled:continue
+            if request.get('pid')!=os.getpid() or request.get('started_at')!=STARTED or request.get('action')!='stop':continue
+            handled.add(rid)
+            with dispatch_lock:
+                busy=any(t['state'] in ('queued','running') for t in ledger.list_tasks(500))
+                if busy:
+                    save(DATA/f'service-response-{os.getpid()}.json',{'request_id':rid,'state':'busy'});continue
+                shutdown_request.update(request);stop_event.set()
+            http.shutdown()
+    save(DATA/'service.json',{'pid':os.getpid(),'started_at':STARTED,'url':f'http://127.0.0.1:{PORT}','code_hash':CODE_HASH,'features':FEATURES})
+    scheduler=threading.Thread(target=schedule,daemon=True);scheduler.start()
+    threading.Thread(target=lifecycle,daemon=True).start()
     try:http.serve_forever()
-    finally:http.server_close();singleton.close()
+    finally:
+        stop_event.set();http.server_close();scheduler.join(timeout=3);singleton.close()
+        if shutdown_request:save(DATA/f'service-response-{os.getpid()}.json',{'request_id':shutdown_request['request_id'],'state':'stopped','pid':os.getpid()})
 
 def main():
     p=argparse.ArgumentParser();sub=p.add_subparsers(dest='cmd',required=True)

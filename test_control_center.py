@@ -6,6 +6,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest import mock
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from ledger import Ledger
 import telemetry
@@ -96,5 +97,23 @@ class UsageTests(unittest.TestCase):
                 telemetry.LOCAL.request_key='turn:3';telemetry.record_usage(state,Response(None,2,1));telemetry.record_usage(state,Response(None,2,1))
                 self.assertEqual(telemetry.snapshot()[1]['total_tokens'],41)
             finally:telemetry.DATA,telemetry.DB=old_data,old_db;telemetry.LOCAL.run_id=telemetry.LOCAL.task_id=None
+
+class ServiceControlTests(unittest.TestCase):
+    def test_restart_refuses_queued_or_running_work_before_writing_request(self):
+        import service_control
+        for state in ('queued','running'):
+            with self.subTest(state=state),mock.patch.object(service_control,'status',return_value={'service':{'features':['graceful-service-control']},'tasks':[{'state':state}]}),mock.patch.object(service_control,'save') as write:
+                with self.assertRaisesRegex(RuntimeError,'queued/running'):service_control.stop()
+                write.assert_not_called()
+    def test_legacy_service_is_not_terminated_automatically(self):
+        import service_control
+        with mock.patch.object(service_control,'status',return_value={'service':{'features':[]},'tasks':[]}),mock.patch.object(service_control,'save') as write:
+            with self.assertRaisesRegex(RuntimeError,'Legacy service'):service_control.stop()
+            write.assert_not_called()
+    def test_start_does_not_launch_duplicate_service(self):
+        import service_control
+        with mock.patch.object(service_control,'status',return_value={'service':{'pid':123}}),mock.patch.object(service_control.subprocess,'Popen') as launch:
+            self.assertEqual(service_control.start(),{'state':'already_running','pid':123})
+            launch.assert_not_called()
 
 if __name__=='__main__':unittest.main(verbosity=2)

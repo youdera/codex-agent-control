@@ -39,6 +39,15 @@ python -m venv .venv
 
 打开 [本地控制台](http://127.0.0.1:8791)。Windows 也可双击 `start-panel.cmd`。程序不创建系统启动项。
 
+更新代码后，用正式生命周期命令加载新版：
+
+```powershell
+.venv\Scripts\python.exe -I -X utf8 service_control.py status
+.venv\Scripts\python.exe -I -X utf8 service_control.py restart
+```
+
+Windows 也可双击 `restart-panel.cmd`。重启采用当前服务实例确认的正常退出协议，保留任务、用量和资源预留；存在排队或运行任务时会拒绝重启，不强杀执行者。API `service.code_hash` 标记实际加载的后端版本，`service.features` 标明已生效功能。缺少此协议的旧服务只报告需操作者核验后迁移，不自动终止进程。
+
 Windows 可选地从已有的 Credential Manager 通用凭据 `codex-deepseek-mcp-api-key` 读取 Key；项目不会自动创建凭据。其他系统使用环境变量。不要把真实 Key 填进任务、命令参数、仓库或截图。
 
 上游的非秘密配置位于用户目录下 `.deepseek-mcp/config.json`，模板见 [examples/mcp-config.example.json](examples/mcp-config.example.json)。若已使用上游 MCP，不要覆盖现有配置；确认 Flash 的调用名是 `deepseek-flash`。
@@ -169,7 +178,7 @@ CLI 会重新查询上游当前记录，要求 ID 集合完全一致、文件哈
 .venv\Scripts\python.exe -I -X utf8 test_control_center.py
 ```
 
-12 项检查覆盖任务对齐门、并发互斥、依赖验收门、修改恢复门、旧证据/旧批次拒绝、人工有界返修、外部资源预留、失联留档、关闭不放行依赖、逐请求去重和缓存口径。
+15 项检查覆盖任务对齐门、并发互斥、依赖验收门、修改恢复门、旧证据/旧批次拒绝、人工有界返修、外部资源预留、失联留档、关闭不放行依赖、逐请求去重、缓存口径，以及有工单时拒绝重启、旧服务不自动终止、防止重复启动。
 
 本机还实际核验过两名 Flash 并行、Edit + 真命令校验、只读随机标记、恢复确认、真实 runner 中断及桌面/手机界面。私有测试工单、运行日志和截图不随仓库发布；这不代表任意项目或上游新版本都已验证。
 
@@ -180,6 +189,7 @@ CLI 会重新查询上游当前记录，要求 ID 集合完全一致、文件哈
 | `telemetry.py` | 最小化工具事件与真实 usage |
 | `mcp_launcher.py` | 本地取 Key、安装监控包装、启动上游 |
 | `settings.py` | 无秘密的路径/端口配置 |
+| `service_control.py` | 显式启动、正常退出、重启及版本确认 |
 | `alignment.py` / `skills/grill-me/` | 对齐摘要校验与主控访谈约定 |
 | `index.html` / `skins/` | 面板与换肤 |
 
