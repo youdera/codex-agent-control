@@ -128,7 +128,7 @@ class ServiceControlTests(unittest.TestCase):
         old={'task_id':'one','attempt':1,'phase':'failed','total_tokens':100}
         new={'task_id':'one','attempt':2,'phase':'request','total_tokens':5}
         task={'id':'one','spec':{},'attempt':2,'state':'running','delivery':'attempt-1.json',
-            'review':{'decision':'rework'},'dependencies':[],'resources':[],'workspace':'w','released':False}
+            'review':{'decision':'rework','attempt':1},'dependencies':[],'resources':[],'workspace':'w','released':False}
         for state,runs,expected in (('running',[old],None),('running',[new,old],new),('queued',[old],None)):
             with self.subTest(state=state,runs=len(runs)),mock.patch.object(control_center,'Ledger') as ledger,mock.patch.object(telemetry,'snapshot',return_value=(runs,{'total_tokens':105},[])):
                 ledger.return_value.list_tasks.return_value=[dict(task,state=state)]
@@ -137,8 +137,23 @@ class ServiceControlTests(unittest.TestCase):
                 self.assertEqual(current['runtime'],expected)
                 self.assertIsNone(current['delivery']);self.assertIsNone(current['review'])
                 self.assertEqual(current['previous_delivery'],'attempt-1.json')
-                self.assertEqual(current['previous_review'],{'decision':'rework'})
+                self.assertEqual(current['previous_review'],{'decision':'rework','attempt':1})
                 self.assertEqual(result['summary']['total_tokens'],105)
+
+    def test_delivered_retry_does_not_show_previous_review_as_current_acceptance(self):
+        import control_center
+        task={'id':'one','spec':{},'attempt':2,'state':'delivered','delivery':'attempt-2.json',
+            'review':{'decision':'rework','attempt':1},'dependencies':[],'resources':[],'workspace':'w','released':True}
+        with mock.patch.object(control_center,'Ledger') as ledger,mock.patch.object(telemetry,'snapshot',return_value=([],{},[])):
+            ledger.return_value.list_tasks.return_value=[task];ledger.return_value.resources.return_value=[];ledger.return_value.events.return_value=[]
+            current=control_center.public_snapshot()['tasks'][0]
+            self.assertEqual(current['delivery'],'attempt-2.json');self.assertIsNone(current['review'])
+            self.assertEqual(current['previous_review']['attempt'],1)
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'receipt.json';path.write_text('{"attempt":2}',encoding='utf-8')
+            review={'receipt':{'path':str(path),'sha256':hashlib.sha256(path.read_bytes()).hexdigest()}}
+            self.assertEqual(control_center.review_attempt(review),2)
+            path.write_text('{"attempt":3}',encoding='utf-8');self.assertIsNone(control_center.review_attempt(review))
 
     def test_worker_python_command_uses_configured_interpreter(self):
         import control_center

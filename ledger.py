@@ -141,8 +141,8 @@ class Ledger:
             for path,digest in hashes.items():
                 p=Path(path)
                 if not p.is_absolute() or not p.is_file() or hashlib.sha256(p.read_bytes()).hexdigest()!=digest:raise ValueError('artifact changed since review')
-            c.execute('UPDATE cc_tasks SET state=?,released=?,review=?,updated_at=? WHERE id=?',(decision,int(decision in ('accepted','closed') or t['readonly']),json.dumps({'receipt':evidence,'reviewer':reviewer,'decision':decision},ensure_ascii=True),time.time(),id))
-            self._event(c,id,'review_'+decision,{'reviewer':reviewer,'evidence_sha256':evidence['sha256']})
+            c.execute('UPDATE cc_tasks SET state=?,released=?,review=?,updated_at=? WHERE id=?',(decision,int(decision in ('accepted','closed') or t['readonly']),json.dumps({'receipt':evidence,'reviewer':reviewer,'decision':decision,'attempt':t['attempt']},ensure_ascii=True),time.time(),id))
+            self._event(c,id,'review_'+decision,{'reviewer':reviewer,'attempt':t['attempt'],'evidence_sha256':evidence['sha256']})
         return self.get(id)
     def cancel_queued(self,id):
         with self.connect() as c:

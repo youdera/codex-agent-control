@@ -167,6 +167,18 @@ async def acknowledge(id,receipt):
         save(DATA/'deliveries'/id/f"recovery-review-{task['attempt']}.json",data)
     return {'task_id':id,'recovery_cleared':True}
 
+def review_attempt(review):
+    if not review:return None
+    if type(review.get('attempt')) is int:return review['attempt']
+    # Read only bounded, hash-matching legacy receipts; never relabel stale evidence.
+    try:
+        receipt=review['receipt'];path=Path(receipt['path'])
+        if path.stat().st_size>65536:return None
+        raw=path.read_bytes()
+        if hashlib.sha256(raw).hexdigest()!=receipt['sha256']:return None
+        return json.loads(raw).get('attempt')
+    except (OSError,ValueError,KeyError,TypeError,AttributeError):return None
+
 def public_snapshot():
     ledger=Ledger(DB);runs,totals,events=telemetry.snapshot();latest={}
     for r in runs:
@@ -177,8 +189,9 @@ def public_snapshot():
         task.pop('spec',None)
         task['runtime']=latest.get((task['id'],task['attempt'])) if task['state']!='queued' else None
         task['previous_delivery']=task['previous_review']=None
-        if task['state'] in ('queued','running'):
+        if task['delivery'] and (task['state'] in ('queued','running') or Path(task['delivery']).name!=f"attempt-{task['attempt']}.json"):
             task['previous_delivery']=task['delivery'];task['delivery']=None
+        if task['review'] and (task['state'] in ('queued','running') or review_attempt(task['review'])!=task['attempt']):
             task['previous_review']=task['review'];task['review']=None
         tasks.append(task)
     by_id={t['id']:t for t in tasks};held={r['name'] for r in ledger.resources()}
